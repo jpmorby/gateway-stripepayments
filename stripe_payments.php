@@ -697,7 +697,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         if ($this->meta['request_three_d_secure'] == 'frictionless') {
             $this->meta['request_three_d_secure'] = is_null($client_reference_id) ? 'challenge' : 'automatic';
         }
-        
+
         if (isset($this->staff_id)) {
             $this->meta['request_three_d_secure'] = 'automatic';
         }
@@ -710,6 +710,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             'payment_method' => $account_reference_id,
             'payment_method_options' => ['card' => ['request_three_d_secure' => $this->meta['request_three_d_secure']]],
             'description' => $this->getChargeDescription($invoice_amounts),
+            'metadata' => ['invoices' => $this->serializeInvoices($invoice_amounts)],
             'confirm' => true,
             'off_session' => true
         ];
@@ -746,6 +747,57 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             'message' => ($message ?? null)
         ];
     }
+    /**
+     * Serializes an array of invoice info into a string.
+     *
+     * @param array A numerically indexed array invoices info including:
+     *  - id The ID of the invoice
+     *  - amount The amount relating to the invoice
+     * @return string A serialized string of invoice info in the format of key1=value1|key2=value2
+     */
+    private function serializeInvoices(array $invoices)
+    {
+        $str = '';
+        foreach ($invoices as $i => $invoice) {
+            $str .= ($i > 0 ? '|' : '') . $invoice['invoice_id'] . '=' . $invoice['amount'];
+        }
+
+        return $str;
+    }
+
+
+    /**
+     * Unserializes a string of invoice info into an array.
+     *
+     * @param string $invoices_string A serialized string of invoice info in the format of key1=value1|key2=value2
+     * @return array A numerically indexed array invoices info including:
+     *  - id The ID of the invoice
+     *  - amount The amount relating to the invoice
+     */
+    private function parseInvoiceAmounts($invoices_string)
+    {
+        if (!isset($this->Invoices)) {
+            Loader::loadModels($this, ['Invoices']);
+        }
+
+
+        $invoices = [];
+        $temp = explode('|', $invoices_string);
+        foreach ($temp as $pair) {
+            $pairs = explode('=', $pair, 2);
+            if (count($pairs) != 2) {
+                continue;
+            }
+            $invoice_id = $pairs[0];
+            $amount = $pairs[1];
+
+            if (($invoice = $this->Invoices->get($invoice_id))) {
+                $invoices[] = ['invoice_id' => $invoice_id, 'amount' => min($amount, $invoice->due)];
+            }
+        }
+
+        return $invoices;
+    }
 
     /**
      * {@inheritdoc}
@@ -761,7 +813,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         if ($this->meta['request_three_d_secure'] == 'frictionless') {
             $this->meta['request_three_d_secure'] = is_null($client_reference_id) ? 'challenge' : 'automatic';
         }
-        
+
         if (isset($this->staff_id)) {
             $this->meta['request_three_d_secure'] = 'automatic';
         }
@@ -771,6 +823,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             'amount' => $this->formatAmount($amount, (isset($this->currency) ? $this->currency : null)),
             'currency' => (isset($this->currency) ? $this->currency : null),
             'description' => $this->getChargeDescription($invoice_amounts),
+            'metadata' => ['invoices' => $this->serializeInvoices($invoice_amounts)],
             'payment_method' => $account_reference_id,
             'payment_method_options' => ['card' => ['request_three_d_secure' => $this->meta['request_three_d_secure']]],
             'capture_method' => 'manual',
@@ -907,7 +960,8 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             'status' => $status,
             'reference_id' => ($captured_payment_intent->error->payment_intent->id ?? $captured_payment_intent->id ?? null),
             'transaction_id' => ($captured_payment_intent->latest_charge ?? null),
-            'message' => ($message ?? null)
+            'message' => ($message ?? null),
+            'invoices' => $this->parseInvoiceAmounts($captured_payment_intent->metadata->invoices ?? '')
         ];
     }
 
@@ -1562,7 +1616,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
                     ->orWhere('transactions.reference_id', '=', $charge_id)
                 ->close()
             ->fetch();
-        
+
         $latest_charge = $this->handleApiRequest(
                 ['Stripe\Charge', 'retrieve'],
                 [$charge_id],
@@ -1600,6 +1654,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
                 strtoupper($payload->data->object->currency ?? ''),
                 'from'
             ),
+            'invoices' => $this->parseInvoiceAmounts($payload->data->object->metadata->invoices ?? ''),
             'currency' => strtoupper($payload->data->object->currency) ?? null,
             'status' => $status,
             'reference_id' => $transaction->reference_id,
