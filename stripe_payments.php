@@ -1448,19 +1448,28 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         array $invoice_amounts = null
     )
     {
-        // Charge the given PaymentMethod through Stripe
+        // Charge the given PaymentMethod through Stripe using Payment Intents API
         $charge = [
             'amount' => $this->formatAmount($amount, ($this->currency ?? null)),
             'currency' => ($this->currency ?? null),
             'customer' => $client_reference_id,
-            'source' => $account_reference_id,
-            'description' => $this->getChargeDescription($invoice_amounts)
+            'payment_method' => $account_reference_id,
+            'payment_method_types' => ['us_bank_account'],
+            'description' => $this->getChargeDescription($invoice_amounts),
+            'metadata' => ['invoices' => $this->serializeInvoices($invoice_amounts)],
+            'confirm' => true,
+            'off_session' => true,
+            'mandate_data' => [
+                'customer_acceptance' => [
+                    'type' => 'offline'
+                ]
+            ]
         ];
 
         $payment = $this->handleApiRequest(
-            ['Stripe\Charge', 'create'],
+            ['Stripe\PaymentIntent', 'create'],
             [$charge],
-            $this->base_url . 'charges - create'
+            $this->base_url . 'payment_intents - create'
         );
         $errors = $this->Input->errors();
 
@@ -1468,26 +1477,45 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             return false;
         }
 
+        // Convert to array for consistent access
+        $payment = json_decode(json_encode($payment), true);
+
         // Set whether there was an error
         $status = 'error';
-        if (isset($payment['error'])) {
+        if (isset($payment['error']) && (($payment['error']['code'] ?? null) === 'card_declined')) {
             $status = 'declined';
-        } elseif (!isset($payment->error)
-            && empty($errors)
-            && isset($payment->status)
-            && $payment->status === 'pending'
-        ) {
-            $status = 'approved';
+        } elseif ((!isset($payment['error'])) && empty($errors)) {
+            // Map PaymentIntent statuses to Blesta statuses
+            switch ($payment['status'] ?? null) {
+                case 'succeeded':
+                    $status = 'approved';
+                    break;
+                case 'processing':
+                    // ACH payments go through 'processing' state during bank clearing (2-5 days)
+                    $status = 'pending';
+                    break;
+                case 'requires_action':
+                case 'requires_confirmation':
+                case 'requires_capture':
+                    $status = 'pending';
+                    break;
+                case 'canceled':
+                case 'requires_payment_method':
+                    $status = 'declined';
+                    break;
+                default:
+                    // Unknown status, treat as error
+                    $message = $payment['error']['message'] ?? 'Unknown payment status: ' . ($payment['status'] ?? 'none');
+                    break;
+            }
         } else {
-            $message = isset($payment->error)
-                ? ($payment->error->message ?? null)
-                : ($payment['error']['message'] ?? '');
+            $message = $payment['error']['message'] ?? null;
         }
 
         return [
             'status' => $status,
-            'reference_id' => ($payment->balance_transaction ?? null),
-            'transaction_id' => ($payment->id ?? null),
+            'reference_id' => null,
+            'transaction_id' => $payment['latest_charge'] ?? null,
             'message' => ($message ?? null)
         ];
     }
