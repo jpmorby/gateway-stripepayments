@@ -1080,12 +1080,12 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
     }
 
     /**
-     * Convert amount from decimal value to integer representation of cents
+     * Convert amount between decimal value and integer representation of cents
      *
      * @param float $amount
      * @param string $currency
-     * @param string $direction
-     * @return int The amount in cents
+     * @param string $direction 'to' converts dollars to cents, 'from' converts cents to dollars
+     * @return int|float The amount in cents (int) when direction is 'to', or dollars (float) when 'from'
      */
     private function formatAmount($amount, $currency, $direction = 'to')
     {
@@ -1099,7 +1099,8 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
                 $amount /= 100;
             }
         }
-        return (int)round($amount);
+
+        return $direction == 'to' ? (int) round($amount) : round($amount, 2);
     }
 
     /**
