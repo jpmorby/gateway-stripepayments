@@ -1630,14 +1630,25 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             $payload = (object) [];
         }
 
-        // Validate only payment intent events
-        if ($payload->data->object->object !== 'charge') {
+        // Validate only charge and payment intent events
+        $object_type = $payload->data->object->object ?? null;
+        if (!in_array($object_type, ['charge', 'payment_intent'])) {
             return false;
         }
 
         // Fetch client
         Loader::loadComponents($this, ['Record']);
-        $charge_id = $payload->data->object->id ?? $payload->data->object->latest_charge ?? null;
+
+        // Extract the charge ID based on event type
+        if ($object_type === 'payment_intent') {
+            $charge_id = $payload->data->object->latest_charge ?? null;
+        } else {
+            $charge_id = $payload->data->object->id ?? null;
+        }
+
+        if (empty($charge_id)) {
+            return false;
+        }
         $transaction = $this->Record->select()
             ->from('transactions')
                 ->open()

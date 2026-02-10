@@ -39,7 +39,7 @@ $lang['StripePayments.tooltip_publishable_key'] = 'Your API Publishable Key is s
 $lang['StripePayments.tooltip_secret_key'] = 'Your API Secret Key is specific to either live or test mode. Be sure you are using the correct key.';
 
 $lang['StripePayments.webhook'] = 'Stripe Webhook';
-$lang['StripePayments.webhook_note'] = 'It is recommended to configure the following url as a Webhook for "payment_intent" events in your Stripe account.';
+$lang['StripePayments.webhook_note'] = 'It is recommended to configure the following url as a Webhook for "payment_intent" and "charge" events in your Stripe account.';
 
 
 $lang['StripePayments.heading_migrate_accounts'] = 'Migrate Old Payment Accounts';
