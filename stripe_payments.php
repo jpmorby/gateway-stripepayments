@@ -1492,8 +1492,10 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
                     $status = 'approved';
                     break;
                 case 'processing':
-                    // ACH payments go through 'processing' state during bank clearing (2-5 days)
-                    $status = 'pending';
+                    // ACH payments go through 'processing' state during bank clearing (2-5 days).
+                    // Optimistically approve so the invoice closes and cron doesn't re-charge.
+                    // If the bank transfer ultimately fails, the webhook will update to declined.
+                    $status = 'approved';
                     break;
                 case 'requires_action':
                 case 'requires_confirmation':
@@ -1673,9 +1675,15 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         if (isset($stripe_status)) {
             switch ($stripe_status) {
                 case 'requires_capture':
-                case 'pending':
                 case 'requires_payment_method':
                     $status = 'pending';
+                    break;
+                case 'pending':
+                    // ACH charges start as 'pending' while clearing through the bank.
+                    // Optimistically approve to match processStoredAch() behavior and
+                    // prevent the webhook from downgrading an already-approved transaction.
+                    // If the transfer fails, charge.failed will update to declined.
+                    $status = 'approved';
                     break;
                 case 'canceled':
                 case 'failed':
