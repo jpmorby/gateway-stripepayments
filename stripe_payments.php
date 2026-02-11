@@ -1492,8 +1492,10 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
                     $status = 'approved';
                     break;
                 case 'processing':
-                    // ACH payments go through 'processing' state during bank clearing (2-5 days)
-                    $status = 'pending';
+                    // ACH payments go through 'processing' state during bank clearing (2-5 days).
+                    // Optimistically approve so the invoice closes and cron doesn't re-charge.
+                    // If the bank transfer ultimately fails, the webhook will update to declined.
+                    $status = 'approved';
                     break;
                 case 'requires_action':
                 case 'requires_confirmation':
@@ -1630,14 +1632,25 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             $payload = (object) [];
         }
 
-        // Validate only payment intent events
-        if ($payload->data->object->object !== 'charge') {
+        // Validate only charge and payment intent events
+        $object_type = $payload->data->object->object ?? null;
+        if (!in_array($object_type, ['charge', 'payment_intent'])) {
             return false;
         }
 
         // Fetch client
         Loader::loadComponents($this, ['Record']);
-        $charge_id = $payload->data->object->id ?? $payload->data->object->latest_charge ?? null;
+
+        // Extract the charge ID based on event type
+        if ($object_type === 'payment_intent') {
+            $charge_id = $payload->data->object->latest_charge ?? null;
+        } else {
+            $charge_id = $payload->data->object->id ?? null;
+        }
+
+        if (empty($charge_id)) {
+            return false;
+        }
         $transaction = $this->Record->select()
             ->from('transactions')
                 ->open()
@@ -1662,9 +1675,17 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         if (isset($stripe_status)) {
             switch ($stripe_status) {
                 case 'requires_capture':
-                case 'pending':
+                case 'requires_confirmation':
+                case 'requires_action':
                 case 'requires_payment_method':
                     $status = 'pending';
+                    break;
+                case 'processing':
+                case 'pending':
+                    // ACH payments clearing through the bank (PaymentIntent 'processing' or Charge 'pending').
+                    // Optimistically approve to match processStoredAch() behavior and prevent
+                    // re-charging. If the transfer fails, webhooks will update to declined.
+                    $status = 'approved';
                     break;
                 case 'canceled':
                 case 'failed':
