@@ -1675,14 +1675,16 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         if (isset($stripe_status)) {
             switch ($stripe_status) {
                 case 'requires_capture':
+                case 'requires_confirmation':
+                case 'requires_action':
                 case 'requires_payment_method':
                     $status = 'pending';
                     break;
+                case 'processing':
                 case 'pending':
-                    // ACH charges start as 'pending' while clearing through the bank.
-                    // Optimistically approve to match processStoredAch() behavior and
-                    // prevent the webhook from downgrading an already-approved transaction.
-                    // If the transfer fails, charge.failed will update to declined.
+                    // ACH payments clearing through the bank (PaymentIntent 'processing' or Charge 'pending').
+                    // Optimistically approve to match processStoredAch() behavior and prevent
+                    // re-charging. If the transfer fails, webhooks will update to declined.
                     $status = 'approved';
                     break;
                 case 'canceled':
