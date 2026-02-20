@@ -23,7 +23,14 @@
 
             event.preventDefault();
             // Confirm the PaymentIntent, the card will not actually be charged until we capture server side
-            stripe.handleCardPayment('<?php echo (isset($payment_intent->client_secret) ? $this->Html->safe($payment_intent->client_secret) : null);?>', {payment_method: '<?php echo (isset($payment_intent->payment_method) ? $this->Html->safe($payment_intent->payment_method) : null);?>'}).then(function(result) {
+            stripe.confirmPayment({
+                clientSecret: '<?php echo (isset($payment_intent->client_secret) ? $this->Html->safe($payment_intent->client_secret) : null);?>',
+                confirmParams: {
+                    payment_method: '<?php echo (isset($payment_intent->payment_method) ? $this->Html->safe($payment_intent->payment_method) : null);?>',
+                    return_url: window.location.href
+                },
+                redirect: 'if_required'
+            }).then(function(result) {
                 // Resubmit the form, bypassing this handler
                 resubmitPaymentConfirmation();
             });

@@ -249,12 +249,12 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             $this->meta['request_three_d_secure'] = 'challenge';
         }
 
-        // Charge the given PaymentMethod through Stripe
+        // Declare to Stripe the possibility of us creating a PaymentMethod through this page
+        // Using explicit types to avoid showing us_bank_account (handled by the separate ACH form)
         $vars = [[
+            'payment_method_types' => ['card', 'link'],
             'payment_method_options' => ['card' => ['request_three_d_secure' => $this->meta['request_three_d_secure']]],
         ]];
-        // Declare to Stripe the possibility of us creating a card PaymentMethod through this page
-        // This is confirmed in the view using stripe.handleCardSetup
         $setup_intent = $this->handleApiRequest(
             ['Stripe\SetupIntent', 'create'],
             $vars,
@@ -534,13 +534,24 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         }
 
         // Return the reference IDs and card information
+        // Handle non-card PM types (e.g. Link) where card details don't exist
+        if (isset($card->type) && $card->type === 'card' && isset($card->card)) {
+            $last4 = $card->card->last4 ?? null;
+            $expiration = ($card->card->exp_year ?? null)
+                . str_pad(($card->card->exp_month ?? null), 2, 0, STR_PAD_LEFT);
+            $type = $this->mapCardType($card->card->brand ?? null);
+        } else {
+            $last4 = null;
+            $expiration = null;
+            $type = 'other';
+        }
+
         return [
             'client_reference_id' => (isset($customer->id) ? $customer->id : $client_reference_id),
             'reference_id' => (isset($card_info['reference_id']) ? $card_info['reference_id'] : null),
-            'last4' => (isset($card->card->last4) ? $card->card->last4 : null),
-            'expiration' => (isset($card->card->exp_year) ? $card->card->exp_year : null)
-                . str_pad((isset($card->card->exp_month) ? $card->card->exp_month : null), 2, 0, STR_PAD_LEFT),
-            'type' => $this->mapCardType((isset($card->card->brand) ? $card->card->brand : null))
+            'last4' => $last4,
+            'expiration' => $expiration,
+            'type' => $type
         ];
     }
 
@@ -708,7 +719,6 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             'currency' => ($this->currency ?? null),
             'customer' => $client_reference_id,
             'payment_method' => $account_reference_id,
-            'payment_method_options' => ['card' => ['request_three_d_secure' => $this->meta['request_three_d_secure']]],
             'description' => $this->getChargeDescription($invoice_amounts),
             'metadata' => ['invoices' => $this->serializeInvoices($invoice_amounts)],
             'confirm' => true,
@@ -717,8 +727,9 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
 
         if ($customer_present) {
             unset($charge['off_session']);
+            $charge['payment_method_types'] = ['card', 'link'];
+            $charge['payment_method_options'] = ['card' => ['request_three_d_secure' => $this->meta['request_three_d_secure']]];
         } else {
-            unset($charge['payment_method_options']);
             $charge['automatic_payment_methods'] = ['enabled' => true, 'allow_redirects' => 'never'];
         }
 
@@ -825,6 +836,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
             'description' => $this->getChargeDescription($invoice_amounts),
             'metadata' => ['invoices' => $this->serializeInvoices($invoice_amounts)],
             'payment_method' => $account_reference_id,
+            'payment_method_types' => ['card', 'link'],
             'payment_method_options' => ['card' => ['request_three_d_secure' => $this->meta['request_three_d_secure']]],
             'capture_method' => 'manual',
             'setup_future_usage' => 'off_session'
@@ -943,14 +955,23 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         // Set capture account on current session
         if ($status == 'approved') {
             $charge = json_decode(json_encode($latest_charge), true);
-            $card = $charge['payment_method_details']['card'] ?? [];
+            $pm_type = $charge['payment_method_details']['type'] ?? null;
 
-            $account = [
-                'last4' => ($card['last4'] ?? null),
-                'expiration' => ($card['exp_year'] ?? null)
-                    . str_pad(($card['exp_month'] ?? null), 2, 0, STR_PAD_LEFT),
-                'type' => $this->mapCardType(($card['brand'] ?? null))
-            ];
+            if ($pm_type === 'card' && isset($charge['payment_method_details']['card'])) {
+                $card = $charge['payment_method_details']['card'];
+                $account = [
+                    'last4' => ($card['last4'] ?? null),
+                    'expiration' => ($card['exp_year'] ?? null)
+                        . str_pad(($card['exp_month'] ?? null), 2, 0, STR_PAD_LEFT),
+                    'type' => $this->mapCardType(($card['brand'] ?? null))
+                ];
+            } else {
+                $account = [
+                    'last4' => null,
+                    'expiration' => null,
+                    'type' => 'other'
+                ];
+            }
 
             Loader::loadComponents($this, ['Session']);
             $this->Session->write('capture_cc_account', $account);
@@ -1021,7 +1042,7 @@ class StripePayments extends MerchantGateway implements MerchantAch, MerchantAch
         Stripe\Stripe::setAppInfo('Blesta ' . $this->getName(), $this->getVersion(), 'https://blesta.com');
 
         // Set API version
-        Stripe\Stripe::setApiVersion('2023-10-16');
+        Stripe\Stripe::setApiVersion('2025-11-18');
     }
 
     /**

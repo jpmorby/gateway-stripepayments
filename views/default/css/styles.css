@@ -1,29 +1,5 @@
-.StripeElement {
-    box-sizing: border-box;
-
-    height: 20px;
-    width: 100%;
-    max-width: 370px;
-
-    border: 1px solid transparent;
-    border-radius: 4px;
-    background-color: white;
-
-    box-shadow: 0 1px 3px 0 #d6dbe1;
-    -webkit-transition: box-shadow 150ms ease;
-    transition: box-shadow 150ms ease;
-}
-
-.StripeElement--focus {
-    box-shadow: 0 1px 3px 0 #cfd7df;
-}
-
-.StripeElement--invalid {
-    border-color: #fa755a;
-}
-
-.StripeElement--webkit-autofill {
-    background-color: #fefde5 !important;
+#payment-element {
+    min-height: 200px;
 }
 
 #stripe-cc-form, #stripe-ach-form {
@@ -32,7 +8,7 @@
     border-radius: 5px;
     background-color: #f4f4f4;
     width: 100%;
-    max-width: 370px;
+    max-width: 500px;
 }
 
 #stripe-ach-form .form-group {
